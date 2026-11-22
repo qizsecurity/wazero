@@ -1353,16 +1353,12 @@ func (c *Compiler) lowerCurrentOpcode() {
 		c.switchTo(originalLen, loopHeader)
 
 		if c.ensureTermination {
-			// qiz fork: amortized check. Decrement the execution context's loop budget and leave native code for the
-			// Go-side check only when it reaches zero (the Go side refills it), instead of on every iteration.
-			budget := builder.AllocateInstruction().
-				AsLoad(c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32(), ssa.TypeI64).
-				Insert(builder).Return()
+			// qiz fork (EXPERIMENT, register countdown): the budget is an SSA variable, not a field of the execution
+			// context, so the countdown is a register decrement with no store and load per iteration.
+			budget := builder.MustFindValue(c.loopBudgetVariable)
 			one := builder.AllocateInstruction().AsIconst64(1).Insert(builder).Return()
 			left := builder.AllocateInstruction().AsIsub(budget, one).Insert(builder).Return()
-			builder.AllocateInstruction().
-				AsStore(ssa.OpcodeStore, left, c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32()).
-				Insert(builder)
+			builder.DefineVariableInCurrentBB(c.loopBudgetVariable, left)
 			checkBlk, contBlk := builder.AllocateBasicBlock(), builder.AllocateBasicBlock()
 			brz := builder.AllocateInstruction()
 			brz.AsBrz(left, ssa.ValuesNil, checkBlk)
@@ -1380,6 +1376,8 @@ func (c *Compiler) lowerCurrentOpcode() {
 			builder.AllocateInstruction().
 				AsCallIndirect(checkModuleExitCodePtr, &c.checkModuleExitCodeSig, args).
 				Insert(builder)
+			refill := builder.AllocateInstruction().AsIconst64(wazevoapi.LoopCheckBudget).Insert(builder).Return()
+			builder.DefineVariableInCurrentBB(c.loopBudgetVariable, refill)
 			c.insertJumpToBlock(ssa.ValuesNil, contBlk)
 			builder.Seal(checkBlk)
 

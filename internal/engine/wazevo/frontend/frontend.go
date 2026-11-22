@@ -44,6 +44,8 @@ type Compiler struct {
 	wasmFunctionBody                      []byte
 	wasmFunctionBodyOffsetInCodeSection   uint64
 	memoryBaseVariable, memoryLenVariable ssa.Variable
+	// loopBudgetVariable (qiz fork, experiment) counts loop iterations down in a register when ensureTermination is on.
+	loopBudgetVariable ssa.Variable
 	needMemory                            bool
 	memoryShared                          bool
 	globalVariables                       []ssa.Variable
@@ -384,6 +386,11 @@ func (c *Compiler) LowerToSSA() {
 	}
 	c.declareWasmLocals()
 	c.declareNecessaryVariables()
+	if c.ensureTermination {
+		c.loopBudgetVariable = builder.DeclareVariable(ssa.TypeI64)
+		v := builder.AllocateInstruction().AsIconst64(wazevoapi.LoopCheckBudget).Insert(builder).Return()
+		builder.DefineVariable(c.loopBudgetVariable, v, entryBlock)
+	}
 
 	c.lowerBody(entryBlock)
 }
