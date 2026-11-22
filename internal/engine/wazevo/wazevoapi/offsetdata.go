@@ -77,7 +77,7 @@ const (
 
 // LoopCheckBudget (qiz fork) is how many loop iterations compiled code runs between two Go-side module exit checks
 // when ensureTermination is on. Upstream checks on every iteration.
-const LoopCheckBudget = 1 << 18
+const LoopCheckBudget = 1 << 22
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,
 // This is unique per module.
