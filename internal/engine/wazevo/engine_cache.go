@@ -146,7 +146,8 @@ func (e *engine) getCompiledModuleFromCache(module *wasm.Module) (cm *compiledMo
 	return
 }
 
-var magic = []byte{'W', 'A', 'Z', 'E', 'V', 'O'}
+// qiz fork: a different magic, so a cache file compiled by upstream wazero v1.12.0 (per-iteration check) is never loaded.
+var magic = []byte{'W', 'A', 'Z', 'E', 'V', 'Q'}
 
 func serializeCompiledModule(wazeroVersion string, cm *compiledModule) io.Reader {
 	buf := bytes.NewBuffer(nil)

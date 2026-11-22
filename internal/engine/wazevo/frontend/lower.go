@@ -1353,6 +1353,23 @@ func (c *Compiler) lowerCurrentOpcode() {
 		c.switchTo(originalLen, loopHeader)
 
 		if c.ensureTermination {
+			// qiz fork: amortized check. Decrement the execution context's loop budget and leave native code for the
+			// Go-side check only when it reaches zero (the Go side refills it), instead of on every iteration.
+			budget := builder.AllocateInstruction().
+				AsLoad(c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32(), ssa.TypeI64).
+				Insert(builder).Return()
+			one := builder.AllocateInstruction().AsIconst64(1).Insert(builder).Return()
+			left := builder.AllocateInstruction().AsIsub(budget, one).Insert(builder).Return()
+			builder.AllocateInstruction().
+				AsStore(ssa.OpcodeStore, left, c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32()).
+				Insert(builder)
+			checkBlk, contBlk := builder.AllocateBasicBlock(), builder.AllocateBasicBlock()
+			brz := builder.AllocateInstruction()
+			brz.AsBrz(left, ssa.ValuesNil, checkBlk)
+			builder.InsertInstruction(brz)
+			c.insertJumpToBlock(ssa.ValuesNil, contBlk)
+
+			builder.SetCurrentBlock(checkBlk)
 			checkModuleExitCodePtr := builder.AllocateInstruction().
 				AsLoad(c.execCtxPtrValue,
 					wazevoapi.ExecutionContextOffsetCheckModuleExitCodeTrampolineAddress.U32(),
@@ -1363,6 +1380,11 @@ func (c *Compiler) lowerCurrentOpcode() {
 			builder.AllocateInstruction().
 				AsCallIndirect(checkModuleExitCodePtr, &c.checkModuleExitCodeSig, args).
 				Insert(builder)
+			c.insertJumpToBlock(ssa.ValuesNil, contBlk)
+			builder.Seal(checkBlk)
+
+			builder.SetCurrentBlock(contBlk)
+			builder.Seal(contBlk)
 		}
 	case wasm.OpcodeIf:
 		bt := c.readBlockType()
