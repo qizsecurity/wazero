@@ -1352,7 +1352,7 @@ func (c *Compiler) lowerCurrentOpcode() {
 
 		c.switchTo(originalLen, loopHeader)
 
-		if c.ensureTermination {
+		if c.usesLoopBudget {
 			// qiz fork: amortized check. The budget of the frame is an SSA variable (a register, not a field of the
 			// execution context): decrement it, and leave native code for the Go-side module exit check only when it
 			// reaches zero, then refill it. Upstream makes that Go exit at every iteration.
@@ -1539,7 +1539,7 @@ func (c *Compiler) lowerCurrentOpcode() {
 			args = ssa.ValuesNil
 		}
 
-		if c.needListener && targetBlk.ReturnBlock() { // In this case, we have to call the listener before returning.
+		if c.returnNeedsTrampoline() && targetBlk.ReturnBlock() { // In this case, we have to call the listener before returning.
 			// Save the currently active block.
 			current := builder.CurrentBlock()
 
@@ -1548,7 +1548,10 @@ func (c *Compiler) lowerCurrentOpcode() {
 			builder.SetCurrentBlock(targetBlk)
 			sealTargetBlk = true
 
-			c.callListenerAfter()
+			if c.needListener {
+				c.callListenerAfter()
+			}
+			c.storeLoopBudget()
 
 			instr := builder.AllocateInstruction()
 			instr.AsReturn(args)
@@ -3484,6 +3487,7 @@ func (c *Compiler) lowerCurrentOpcode() {
 		}
 
 		c.storeCallerModuleContext()
+		c.storeLoopBudget() // reloadAfterCall below reloads it, and a catch rolls the registers back to the try_table entry.
 
 		tagIdxVal := builder.AllocateInstruction().AsIconst64(uint64(tagIndex)).Insert(builder).Return()
 
@@ -3545,6 +3549,7 @@ func (c *Compiler) lowerCurrentOpcode() {
 		builder.InsertInstruction(exitIfNull)
 
 		c.storeCallerModuleContext()
+		c.storeLoopBudget() // a catch rolls the registers back to the try_table entry.
 
 		c.emitThrow(exnref)
 		state.unreachable = true
@@ -3658,6 +3663,10 @@ func (c *Compiler) lowerCurrentOpcode() {
 					ssa.TypeI64,
 				).Insert(builder).Return()
 
+			// The handler blocks and the body block reload the loop budget after the trampoline returns (a catch rolls the
+			// registers back to this point), so store it first.
+			c.storeLoopBudget()
+
 			// Call the trampoline: (execCtx, encodedExitCode) -> ().
 			exitCodeVal := builder.AllocateInstruction().AsIconst64(encodedExitCode).Insert(builder).Return()
 			args := c.allocateVarLengthValues(2, c.execCtxPtrValue, exitCodeVal)
@@ -3749,12 +3758,15 @@ func (c *Compiler) lowerCurrentOpcode() {
 			args = ssa.ValuesNil
 		}
 
-		if c.needListener && targetBlk.ReturnBlock() {
+		if c.returnNeedsTrampoline() && targetBlk.ReturnBlock() {
 			current := builder.CurrentBlock()
 			targetBlk = builder.AllocateBasicBlock()
 			builder.SetCurrentBlock(targetBlk)
 			sealTargetBlk = true
-			c.callListenerAfter()
+			if c.needListener {
+				c.callListenerAfter()
+			}
+			c.storeLoopBudget()
 			instr := builder.AllocateInstruction()
 			instr.AsReturn(args)
 			builder.InsertInstruction(instr)
@@ -3809,12 +3821,15 @@ func (c *Compiler) lowerCurrentOpcode() {
 			args = ssa.ValuesNil
 		}
 
-		if c.needListener && targetBlk.ReturnBlock() {
+		if c.returnNeedsTrampoline() && targetBlk.ReturnBlock() {
 			current := builder.CurrentBlock()
 			targetBlk = builder.AllocateBasicBlock()
 			builder.SetCurrentBlock(targetBlk)
 			sealTargetBlk = true
-			c.callListenerAfter()
+			if c.needListener {
+				c.callListenerAfter()
+			}
+			c.storeLoopBudget()
 			instr := builder.AllocateInstruction()
 			instr.AsReturn(args)
 			builder.InsertInstruction(instr)
@@ -3866,6 +3881,7 @@ func (c *Compiler) lowerCurrentOpcode() {
 }
 
 func (c *Compiler) lowerReturn(builder ssa.Builder) {
+	c.storeLoopBudget()
 	results := c.nPeekDup(c.results())
 	instr := builder.AllocateInstruction()
 
@@ -3996,6 +4012,7 @@ func (c *Compiler) lowerCall(fnIndex uint32) {
 	} else {
 		call.AsCall(ssa.FuncRef(funcRefOrPtrValue), sig, args)
 	}
+	c.storeLoopBudget()
 	builder.InsertInstruction(call)
 
 	first, rest := call.Returns()
@@ -4087,6 +4104,7 @@ func (c *Compiler) lowerCallIndirect(typeIndex, tableIndex uint32) {
 
 	call := builder.AllocateInstruction()
 	call.AsCallIndirect(executablePtr, c.signatures[typ], args)
+	c.storeLoopBudget()
 	builder.InsertInstruction(call)
 
 	first, rest := call.Returns()
@@ -4111,6 +4129,7 @@ func (c *Compiler) lowerTailCallReturnCall(fnIndex uint32) {
 	} else {
 		call.AsTailCallReturnCall(ssa.FuncRef(funcRefOrPtrValue), sig, args)
 	}
+	c.storeLoopBudget()
 	builder.InsertInstruction(call)
 
 	// In a proper tail call, the following code is unreachable since execution
@@ -4137,6 +4156,7 @@ func (c *Compiler) lowerTailCallReturnCallIndirect(typeIndex, tableIndex uint32)
 
 	call := builder.AllocateInstruction()
 	call.AsTailCallReturnCallIndirect(executablePtr, c.signatures[typ], args)
+	c.storeLoopBudget()
 	builder.InsertInstruction(call)
 
 	// In a proper tail call, the following code is unreachable since execution
@@ -4202,6 +4222,7 @@ func (c *Compiler) lowerCallRef(typeIndex uint32) {
 
 	call := builder.AllocateInstruction()
 	call.AsCallIndirect(executablePtr, c.signatures[typ], args)
+	c.storeLoopBudget()
 	builder.InsertInstruction(call)
 
 	first, rest := call.Returns()
@@ -4222,6 +4243,7 @@ func (c *Compiler) lowerTailCallReturnCallRef(typeIndex uint32) {
 
 	call := builder.AllocateInstruction()
 	call.AsTailCallReturnCallIndirect(executablePtr, c.signatures[typ], args)
+	c.storeLoopBudget()
 	builder.InsertInstruction(call)
 
 	// In a proper tail call, the following code is unreachable since execution
@@ -4377,6 +4399,44 @@ func (c *Compiler) reloadAfterCall() {
 	for _, index := range c.mutableGlobalVariablesIndexes {
 		_ = c.getWasmGlobalValue(index, true)
 	}
+
+	// The loop budget is shared by all frames of the call: the callee, or a catch, may have changed it.
+	c.reloadLoopBudget()
+}
+
+// returnNeedsTrampoline tells whether a conditional branch to the function's return needs a block of its own, where code
+// that must run on the taken path only is emitted before the return: the listener's after-call and the loop budget store.
+func (c *Compiler) returnNeedsTrampoline() bool {
+	return c.needListener || c.usesLoopBudget
+}
+
+// storeLoopBudget saves the loop budget of this frame (an SSA variable, a register) to the execution context before
+// control leaves the frame: a call, a tail call, a return, a throw or a try_table entry. The loop budget is shared by all
+// the frames of one call, so that the Go-side module exit check comes after LoopCheckBudget loop iterations of all of them
+// together, at any call depth. Same shape as the fuel of wasmtime (func_environ.rs: saved before every call, return_call and
+// return, reloaded after the call).
+func (c *Compiler) storeLoopBudget() {
+	if !c.usesLoopBudget {
+		return
+	}
+	builder := c.ssaBuilder
+	v := builder.MustFindValue(c.loopBudgetVariable)
+	builder.AllocateInstruction().
+		AsStore(ssa.OpcodeStore, v, c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32()).
+		Insert(builder)
+}
+
+// reloadLoopBudget loads the shared loop budget again into this frame's variable, after a call or a catch. When the
+// variable is not used afterwards the load is removed as dead code.
+func (c *Compiler) reloadLoopBudget() {
+	if !c.usesLoopBudget {
+		return
+	}
+	builder := c.ssaBuilder
+	v := builder.AllocateInstruction().
+		AsLoad(c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32(), ssa.TypeI64).
+		Insert(builder).Return()
+	builder.DefineVariableInCurrentBB(c.loopBudgetVariable, v)
 }
 
 func (c *Compiler) reloadMemoryBaseLen() {
@@ -4814,6 +4874,9 @@ func (c *Compiler) insertJumpToBlock(args ssa.Values, targetBlk ssa.BasicBlock) 
 		if c.needListener {
 			c.callListenerAfter()
 		}
+		if !c.returnBudgetStored {
+			c.storeLoopBudget()
+		}
 	}
 
 	builder := c.ssaBuilder
@@ -4871,6 +4934,18 @@ func (c *Compiler) lowerBrTable(labels []uint32, index ssa.Value) {
 	} else {
 		numArgs = len(f.blockType.Results)
 	}
+
+	// The loop budget is stored here, before the br_table, if a label returns from the function: the trampoline blocks below
+	// have no predecessor yet, so they cannot read the budget variable (it would become a block parameter, which a br_table
+	// cannot pass).
+	for _, l := range labels {
+		if targetBlk, _ := state.brTargetArgNumFor(l); targetBlk.ReturnBlock() {
+			c.storeLoopBudget()
+			break
+		}
+	}
+	c.returnBudgetStored = true
+	defer func() { c.returnBudgetStored = false }()
 
 	varPool := builder.VarLengthPool()
 	trampolineBlockIDs := varPool.Allocate(len(labels))

@@ -136,6 +136,10 @@ type (
 		// when an exception is caught. Compiled code loads this from execCtx
 		// after the trampoline call to decide which handler to dispatch to.
 		caughtExceptionClauseIdx int64
+		// loopCheckBudget (qiz fork) is the loop iterations left before compiled code leaves for the Go-side module exit
+		// check (ensureTermination). It is shared by all the frames of one call: a frame keeps it in a register, loads it at
+		// entry and after every call, and stores it before every call, return and throw (frontend lowerCall etc.).
+		loopCheckBudget int64
 	}
 )
 
@@ -326,6 +330,7 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 	if ensureTermination {
 		done := m.CloseModuleOnCanceledOrTimeout(ctx)
 		defer done()
+		c.execCtx.loopCheckBudget = wazevoapi.LoopCheckBudget
 	}
 
 	if c.stackTop&(16-1) != 0 {

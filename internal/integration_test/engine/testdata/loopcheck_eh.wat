@@ -17,4 +17,16 @@
     (loop $o
       (block $c
         (try_table (catch_all $c) (call $inner_throw)))
+      (br $o)))
+  ;; the loop, the try_table, the inner loop and the throw are in one function
+  (func (export "ehsame") (local $i i32)
+    (loop $o
+      (block $c
+        (try_table (catch_all $c)
+          (local.set $i (i32.const 0))
+          (loop $in (call $bump)
+            (local.set $i (i32.add (local.get $i) (i32.const 1)))
+            (br_if $in (i32.lt_u (local.get $i) (i32.const 16000))))
+          (throw $e)))
       (br $o))))
+

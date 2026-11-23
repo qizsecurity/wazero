@@ -257,7 +257,7 @@ signatures:
 	sig2: i64_v
 
 blk0: (exec_ctx:i64, module_ctx:i64)
-	v2:i64 = Iconst_64 0x4000
+	v2:i64 = Load exec_ctx, 0x4d8
 	Jump blk1, v2
 
 blk1: (v3:i64) <-- (blk0,blk4)
@@ -282,7 +282,7 @@ signatures:
 	sig2: i64_v
 
 blk0: (exec_ctx:i64, module_ctx:i64)
-	v2:i64 = Iconst_64 0x4000
+	v2:i64 = Load exec_ctx, 0x4d8
 	Jump fallthrough, v2
 
 blk1: (v3:i64) <-- (blk0,blk4)

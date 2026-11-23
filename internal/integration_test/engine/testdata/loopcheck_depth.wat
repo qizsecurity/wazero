@@ -2,7 +2,7 @@
   (import "env" "stop" (func $stop))
   (global $n (export "n") (mut i64) (i64.const 0))
   (global $k (export "k") (mut i64) (i64.const 0))
-  (table 1 funcref)
+  (table 2 funcref)
   (elem (i32.const 0) $inf)
   (type $v (func))
   (func $bump
@@ -78,4 +78,16 @@
       (br_if $l (i32.lt_u (local.get $i) (i32.const 10))))
     (return_call $tl))
   (func (export "tailloop") (call $tl))
+
+  ;; qiz fork: the callee returns through a br_if to the function label (no listener: the branch goes straight to the return)
+  (func $inner_brif (local $i i32)
+    (loop $l (call $bump)
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br_if $l (i32.lt_u (local.get $i) (i32.const 16000))))
+    (br_if 0 (i32.const 1)))
+  (func (export "depth2_brif") (loop $o (call $inner_brif) (br $o)))
+  ;; the callee is reached through call_indirect
+  (elem (i32.const 1) $inner16000)
+  (func (export "depth2_indirect") (loop $o (call_indirect (type $v) (i32.const 1)) (br $o)))
 )
+

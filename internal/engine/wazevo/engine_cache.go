@@ -149,8 +149,9 @@ func (e *engine) getCompiledModuleFromCache(module *wasm.Module) (cm *compiledMo
 // qiz fork: the magic is part of the cache key (fileCacheKey) and of the file header, so a cache file compiled by other
 // code is neither found nor loaded. It must change whenever the generated code changes without the module or the
 // wazero version changing: WAZEVO is upstream v1.12.0 (a Go exit at every loop iteration), WAZEVQ was the fork's first
-// form (a counter in the execution context), WAZEVR is the counter in a register.
-var magic = []byte{'W', 'A', 'Z', 'E', 'V', 'R'}
+// form (a counter in the execution context), WAZEVR a counter in a register of each frame (wrong: not shared by the frames
+// of a call), WAZEVS the counter in a register of each frame, shared through the execution context.
+var magic = []byte{'W', 'A', 'Z', 'E', 'V', 'S'}
 
 func serializeCompiledModule(wazeroVersion string, cm *compiledModule) io.Reader {
 	buf := bytes.NewBuffer(nil)

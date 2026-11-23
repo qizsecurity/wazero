@@ -44,8 +44,13 @@ type Compiler struct {
 	wasmFunctionBody                      []byte
 	wasmFunctionBodyOffsetInCodeSection   uint64
 	memoryBaseVariable, memoryLenVariable ssa.Variable
-	// loopBudgetVariable (qiz fork) counts loop iterations down in a register when ensureTermination is on.
-	loopBudgetVariable            ssa.Variable
+	// loopBudgetVariable (qiz fork) counts loop iterations down in a register. It exists (usesLoopBudget) when
+	// ensureTermination is on and the function body may hold a loop. It is loaded from the execution context at entry
+	// and after every call, and stored before every call, return and throw: see storeLoopBudget.
+	loopBudgetVariable ssa.Variable
+	usesLoopBudget     bool
+	// returnBudgetStored is set while lowerBrTable emits its trampolines, after it stored the budget once for all of them.
+	returnBudgetStored            bool
 	needMemory                    bool
 	memoryShared                  bool
 	globalVariables               []ssa.Variable
@@ -386,9 +391,15 @@ func (c *Compiler) LowerToSSA() {
 	}
 	c.declareWasmLocals()
 	c.declareNecessaryVariables()
-	if c.ensureTermination {
+	// 0x03 is the loop opcode. As a byte test it also matches immediates, which only costs a needless budget sync; it never
+	// misses a loop. A function with no loop never changes the budget, so it keeps no copy and leaves the one in the
+	// execution context to its callers and callees.
+	c.usesLoopBudget = c.ensureTermination && bytes.IndexByte(c.wasmFunctionBody, wasm.OpcodeLoop) >= 0
+	if c.usesLoopBudget {
 		c.loopBudgetVariable = builder.DeclareVariable(ssa.TypeI64)
-		v := builder.AllocateInstruction().AsIconst64(wazevoapi.LoopCheckBudget).Insert(builder).Return()
+		v := builder.AllocateInstruction().
+			AsLoad(c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32(), ssa.TypeI64).
+			Insert(builder).Return()
 		builder.DefineVariable(c.loopBudgetVariable, v, entryBlock)
 	}
 

@@ -70,15 +70,18 @@ const (
 	// ExecutionContextOffsetCaughtExceptionClauseIdx is the matched catch clause index
 	// written by handleException and read by compiled handler dispatch code.
 	ExecutionContextOffsetCaughtExceptionClauseIdx Offset = 1232
+	// ExecutionContextOffsetLoopCheckBudget (qiz fork) is an offset of `loopCheckBudget` field in wazevo.executionContext.
+	ExecutionContextOffsetLoopCheckBudget Offset = 1240
 )
 
-// LoopCheckBudget (qiz fork) is how many loop iterations one function frame runs between two Go-side module exit checks
-// when ensureTermination is on. Upstream checks on every iteration. The count is kept in a register (an SSA variable of
-// the frame), not in the execution context: a counter in memory made each iteration wait for the previous store
-// (store-to-load forwarding), measured 2.0 ns against 0.84 ns an iteration with the counter in a register (check off:
-// 0.56 ns), qiz-sbr docs/wazero/README.md. The value is an immediate of the generated code (initial value and refill),
-// and so is how the count is kept: changing either changes the generated code, and then the cache magic
-// (engine_cache.go) must change too.
+// LoopCheckBudget (qiz fork) is how many loop iterations, counted over all the frames of one call together, compiled code
+// runs between two Go-side module exit checks when ensureTermination is on. Upstream checks on every iteration. The count
+// is shared through the execution context (loopCheckBudget) and kept in a register inside a frame, which loads it at
+// entry and after every call and stores it before every call, return and throw: a counter that lives only in memory made
+// each iteration wait for the previous store (2.0 ns against 0.84 ns an iteration in a register, check off 0.56 ns), and a
+// counter that restarts in each frame never reaches zero in a loop that runs fewer iterations per call than the budget
+// (qiz-sbr docs/wazero/README.md). The value and how the count is kept are immediates and code of the generated code:
+// changing either changes it, and then the cache magic (engine_cache.go) must change too.
 const LoopCheckBudget = 1 << 14
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,
