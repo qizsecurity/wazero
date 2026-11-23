@@ -70,13 +70,14 @@ const (
 	// ExecutionContextOffsetCaughtExceptionClauseIdx is the matched catch clause index
 	// written by handleException and read by compiled handler dispatch code.
 	ExecutionContextOffsetCaughtExceptionClauseIdx Offset = 1232
-	// ExecutionContextOffsetLoopCheckBudget (qiz fork) is an offset of `loopCheckBudget` field in wazevo.executionContext:
-	// the loop iterations left before compiled code leaves for the Go-side module exit check (ensureTermination).
-	ExecutionContextOffsetLoopCheckBudget Offset = 1240
 )
 
-// LoopCheckBudget (qiz fork) is how many loop iterations compiled code runs between two Go-side module exit checks
-// when ensureTermination is on. Upstream checks on every iteration.
+// LoopCheckBudget (qiz fork) is how many loop iterations one function frame runs between two Go-side module exit checks
+// when ensureTermination is on. Upstream checks on every iteration. The count is kept in a register (an SSA variable of
+// the frame), not in the execution context: a counter in memory made each iteration wait for the previous store
+// (store-to-load forwarding), measured 2.0 ns against 0.84 ns an iteration with the counter in a register (check off:
+// 0.56 ns), qiz-sbr docs/wazero/README.md. Changing this value changes no generated code (only the constant of the
+// refill); changing how the count is kept does, and then the cache magic (engine_cache.go) must change too.
 const LoopCheckBudget = 1 << 14
 
 // ModuleContextOffsetData allows the compilers to get the information about offsets to the fields of wazevo.moduleContextOpaque,

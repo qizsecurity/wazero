@@ -136,9 +136,6 @@ type (
 		// when an exception is caught. Compiled code loads this from execCtx
 		// after the trampoline call to decide which handler to dispatch to.
 		caughtExceptionClauseIdx int64
-		// loopCheckBudget (qiz fork) is decremented by compiled code at each loop header when ensureTermination is on;
-		// at zero it leaves for the Go-side check, which refills it (wazevoapi.LoopCheckBudget).
-		loopCheckBudget int64
 	}
 )
 
@@ -329,7 +326,6 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 	if ensureTermination {
 		done := m.CloseModuleOnCanceledOrTimeout(ctx)
 		defer done()
-		c.execCtx.loopCheckBudget = wazevoapi.LoopCheckBudget
 	}
 
 	if c.stackTop&(16-1) != 0 {
@@ -481,7 +477,6 @@ func (c *callEngine) callWithStack(ctx context.Context, paramResultStack []uint6
 			if err := m.FailIfClosed(); err != nil {
 				panic(err)
 			}
-			c.execCtx.loopCheckBudget = wazevoapi.LoopCheckBudget
 			c.execCtx.exitCode = wazevoapi.ExitCodeOK
 			afterGoFunctionCallEntrypoint(c.execCtx.goCallReturnAddress, c.execCtxPtr,
 				uintptr(unsafe.Pointer(c.execCtx.stackPointerBeforeGoCall)), c.execCtx.framePointerBeforeGoCall)

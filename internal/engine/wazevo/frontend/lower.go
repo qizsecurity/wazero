@@ -1353,8 +1353,9 @@ func (c *Compiler) lowerCurrentOpcode() {
 		c.switchTo(originalLen, loopHeader)
 
 		if c.ensureTermination {
-			// qiz fork (EXPERIMENT, register countdown): the budget is an SSA variable, not a field of the execution
-			// context, so the countdown is a register decrement with no store and load per iteration.
+			// qiz fork: amortized check. The budget of the frame is an SSA variable (a register, not a field of the
+			// execution context): decrement it, and leave native code for the Go-side module exit check only when it
+			// reaches zero, then refill it. Upstream makes that Go exit at every iteration.
 			budget := builder.MustFindValue(c.loopBudgetVariable)
 			one := builder.AllocateInstruction().AsIconst64(1).Insert(builder).Return()
 			left := builder.AllocateInstruction().AsIsub(budget, one).Insert(builder).Return()

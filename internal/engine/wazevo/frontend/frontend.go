@@ -44,15 +44,15 @@ type Compiler struct {
 	wasmFunctionBody                      []byte
 	wasmFunctionBodyOffsetInCodeSection   uint64
 	memoryBaseVariable, memoryLenVariable ssa.Variable
-	// loopBudgetVariable (qiz fork, experiment) counts loop iterations down in a register when ensureTermination is on.
-	loopBudgetVariable ssa.Variable
-	needMemory                            bool
-	memoryShared                          bool
-	globalVariables                       []ssa.Variable
-	globalVariablesTypes                  []ssa.Type
-	mutableGlobalVariablesIndexes         []wasm.Index // index to ^.
-	needListener                          bool
-	needSourceOffsetInfo                  bool
+	// loopBudgetVariable (qiz fork) counts loop iterations down in a register when ensureTermination is on.
+	loopBudgetVariable            ssa.Variable
+	needMemory                    bool
+	memoryShared                  bool
+	globalVariables               []ssa.Variable
+	globalVariablesTypes          []ssa.Type
+	mutableGlobalVariablesIndexes []wasm.Index // index to ^.
+	needListener                  bool
+	needSourceOffsetInfo          bool
 	// br is reused during lowering.
 	br            *bytes.Reader
 	loweringState loweringState
