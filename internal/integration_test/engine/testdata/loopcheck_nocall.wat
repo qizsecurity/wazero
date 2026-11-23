@@ -4,6 +4,7 @@
 ;; was requested is what the test bounds.
 (module
   (import "env" "stop" (func $stop))
+  (import "env" "tick" (func $tick))
   (global $n (export "n") (mut i64) (i64.const 0))
   (global $k (export "k") (mut i64) (i64.const 0))
   (global $m (export "m") (mut i64) (i64.const 0))
@@ -70,4 +71,15 @@
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (br_if $l (i32.lt_u (local.get $i) (i32.const 16000))))
     (br_table 0 0 (i32.const 0)))
-  (func (export "ret_brtable") (loop $o (call $bump) (call $brtable_ret) (br $o))))
+  (func (export "ret_brtable") (loop $o (call $bump) (call $brtable_ret) (br $o)))
+  ;; the outer loop calls local functions that hold no loop, call or throw (the caller keeps the budget in its register around
+  ;; them) and one callee with a loop: the budget must still reach zero
+  (func $leaf (param i32) (result i32) (i32.add (local.get 0) (i32.const 1)))
+  (func (export "leaf_and_loop") (local $i i32)
+    (loop $o (call $bump)
+      (local.set $i (call $leaf (local.get $i)))
+      (local.set $i (call $leaf (local.get $i)))
+      (call $loop16000)
+      (br $o)))
+  ;; the only call of the loop is to an imported host function: it stops by the context only (host_only has no stop)
+  (func (export "host_only") (loop $o (call $tick) (br $o))))

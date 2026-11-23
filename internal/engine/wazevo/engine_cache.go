@@ -150,8 +150,10 @@ func (e *engine) getCompiledModuleFromCache(module *wasm.Module) (cm *compiledMo
 // code is neither found nor loaded. It must change whenever the generated code changes without the module or the
 // wazero version changing: WAZEVO is upstream v1.12.0 (a Go exit at every loop iteration), WAZEVQ was the fork's first
 // form (a counter in the execution context), WAZEVR a counter in a register of each frame (wrong: not shared by the frames
-// of a call), WAZEVS the counter in a register of each frame, shared through the execution context.
-var magic = []byte{'W', 'A', 'Z', 'E', 'V', 'S'}
+// of a call), WAZEVS the counter in a register of each frame, shared through the execution context, WAZEVT the same with the
+// store skipped when the register still holds the value last loaded, and with no store or reload around a call to a
+// local function that holds no loop, call or throw byte (frontend isBudgetFree).
+var magic = []byte{'W', 'A', 'Z', 'E', 'V', 'T'}
 
 func serializeCompiledModule(wazeroVersion string, cm *compiledModule) io.Reader {
 	buf := bytes.NewBuffer(nil)

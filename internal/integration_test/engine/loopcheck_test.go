@@ -132,7 +132,7 @@ func TestLoopCheck_BudgetLeavesACalleeThroughReturnThrowAndCall(t *testing.T) {
 		inner uint64 // iterations of the callee's loop per call
 	}{
 		{"ret_end", 16000}, {"ret_brif", 16000}, {"ret_return", 16000}, {"short_callee", 10},
-		{"throw_caught", 16000}, {"throw_same_frame", 16000}, {"try_only", 0}, {"ret_brtable", 16000},
+		{"throw_caught", 16000}, {"throw_same_frame", 16000}, {"try_only", 0}, {"ret_brtable", 16000}, {"leaf_and_loop", 16000},
 	} {
 		t.Run(c.fn, func(t *testing.T) {
 			ctx := context.Background()
@@ -140,8 +140,9 @@ func TestLoopCheck_BudgetLeavesACalleeThroughReturnThrowAndCall(t *testing.T) {
 				WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesTailCall | experimental.CoreFeaturesExceptionHandling)
 			r := wazero.NewRuntimeWithConfig(ctx, cfg)
 			defer r.Close(ctx)
-			_, err := r.NewHostModuleBuilder("env").NewFunctionBuilder().
-				WithFunc(func(ctx context.Context, m api.Module) { _ = m.CloseWithExitCode(ctx, 7) }).Export("stop").
+			_, err := r.NewHostModuleBuilder("env").
+				NewFunctionBuilder().WithFunc(func(ctx context.Context, m api.Module) { _ = m.CloseWithExitCode(ctx, 7) }).Export("stop").
+				NewFunctionBuilder().WithFunc(func() {}).Export("tick").
 				Instantiate(ctx)
 			require.NoError(t, err)
 			mod, err := r.Instantiate(ctx, loopcheckNoCallWasm)
@@ -162,5 +163,34 @@ func TestLoopCheck_BudgetLeavesACalleeThroughReturnThrowAndCall(t *testing.T) {
 				t.Fatalf("%s: the callee's loop ran %d iterations, want at most %d", c.fn, m, want)
 			}
 		})
+	}
+}
+
+// A loop whose only call is to an imported host function is stopped by the context.
+func TestLoopCheck_HostOnlyLoopStopsByContext(t *testing.T) {
+	if !platform.CompilerSupported() {
+		t.Skip()
+	}
+	ctx := context.Background()
+	cfg := wazero.NewRuntimeConfigCompiler().WithCloseOnContextDone(true).
+		WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesTailCall | experimental.CoreFeaturesExceptionHandling)
+	r := wazero.NewRuntimeWithConfig(ctx, cfg)
+	defer r.Close(ctx)
+	_, err := r.NewHostModuleBuilder("env").
+		NewFunctionBuilder().WithFunc(func(ctx context.Context, m api.Module) {}).Export("stop").
+		NewFunctionBuilder().WithFunc(func() {}).Export("tick").
+		Instantiate(ctx)
+	require.NoError(t, err)
+	mod, err := r.Instantiate(ctx, loopcheckNoCallWasm)
+	require.NoError(t, err)
+	cctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := mod.ExportedFunction("host_only").Call(cctx); done <- err }()
+	select {
+	case err := <-done:
+		require.NotNil(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the guest was still running 5 s after a 200 ms limit")
 	}
 }

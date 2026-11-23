@@ -50,7 +50,13 @@ type Compiler struct {
 	loopBudgetVariable ssa.Variable
 	usesLoopBudget     bool
 	// returnBudgetStored is set while lowerBrTable emits its trampolines, after it stored the budget once for all of them.
-	returnBudgetStored            bool
+	returnBudgetStored bool
+	// lastBudgetLoad is the SSA value of the last load of the shared loop budget (the entry load or a reload). While the
+	// variable still holds exactly this value, the execution context holds it too, and a store would write back what is there.
+	lastBudgetLoad ssa.Value
+	// budgetFreeFor and budgetFree cache, for the module being compiled, which local functions cannot change the shared loop budget.
+	budgetFreeFor                 *wasm.Module
+	budgetFree                    map[uint32]bool
 	needMemory                    bool
 	memoryShared                  bool
 	globalVariables               []ssa.Variable
@@ -401,6 +407,7 @@ func (c *Compiler) LowerToSSA() {
 			AsLoad(c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32(), ssa.TypeI64).
 			Insert(builder).Return()
 		builder.DefineVariable(c.loopBudgetVariable, v, entryBlock)
+		c.lastBudgetLoad = v
 	}
 
 	c.lowerBody(entryBlock)

@@ -4005,6 +4005,7 @@ func (c *Compiler) lowerCall(fnIndex uint32) {
 	builder := c.ssaBuilder
 	state := c.state()
 	isIndirect, sig, args, funcRefOrPtrValue := c.prepareCall(fnIndex)
+	budgetFree := !isIndirect && c.isBudgetFree(fnIndex)
 
 	call := builder.AllocateInstruction()
 	if isIndirect {
@@ -4012,7 +4013,9 @@ func (c *Compiler) lowerCall(fnIndex uint32) {
 	} else {
 		call.AsCall(ssa.FuncRef(funcRefOrPtrValue), sig, args)
 	}
-	c.storeLoopBudget()
+	if !budgetFree {
+		c.storeLoopBudget()
+	}
 	builder.InsertInstruction(call)
 
 	first, rest := call.Returns()
@@ -4023,7 +4026,11 @@ func (c *Compiler) lowerCall(fnIndex uint32) {
 		state.push(v)
 	}
 
-	c.reloadAfterCall()
+	if budgetFree {
+		c.reloadAfterCallKeepingBudget()
+	} else {
+		c.reloadAfterCall()
+	}
 }
 
 func (c *Compiler) prepareCallIndirect(typeIndex, tableIndex uint32) (ssa.Value, *wasm.FunctionType, ssa.Values) {
@@ -4386,6 +4393,13 @@ func (c *Compiler) callMemmove(dst, src, size ssa.Value) {
 }
 
 func (c *Compiler) reloadAfterCall() {
+	c.reloadAfterCallKeepingBudget()
+	// The loop budget is shared by all frames of the call: the callee, or a catch, may have changed it.
+	c.reloadLoopBudget()
+}
+
+// reloadAfterCallKeepingBudget is reloadAfterCall for a callee that cannot change the loop budget (isBudgetFree).
+func (c *Compiler) reloadAfterCallKeepingBudget() {
 	// Note that when these are not used in the following instructions, they will be optimized out.
 	// So in any ways, we define them!
 
@@ -4399,9 +4413,6 @@ func (c *Compiler) reloadAfterCall() {
 	for _, index := range c.mutableGlobalVariablesIndexes {
 		_ = c.getWasmGlobalValue(index, true)
 	}
-
-	// The loop budget is shared by all frames of the call: the callee, or a catch, may have changed it.
-	c.reloadLoopBudget()
 }
 
 // returnNeedsTrampoline tells whether a conditional branch to the function's return needs a block of its own, where code
@@ -4421,6 +4432,9 @@ func (c *Compiler) storeLoopBudget() {
 	}
 	builder := c.ssaBuilder
 	v := builder.MustFindValue(c.loopBudgetVariable)
+	if v == c.lastBudgetLoad {
+		return // the variable is still the value loaded last, so the execution context holds it already
+	}
 	builder.AllocateInstruction().
 		AsStore(ssa.OpcodeStore, v, c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32()).
 		Insert(builder)
@@ -4437,6 +4451,40 @@ func (c *Compiler) reloadLoopBudget() {
 		AsLoad(c.execCtxPtrValue, wazevoapi.ExecutionContextOffsetLoopCheckBudget.U32(), ssa.TypeI64).
 		Insert(builder).Return()
 	builder.DefineVariableInCurrentBB(c.loopBudgetVariable, v)
+	c.lastBudgetLoad = v
+}
+
+// isBudgetFree tells whether a call to the local function fnIndex can neither change the shared loop budget nor
+// give control to code that does: its body holds no byte that may be a loop, a call or a throw. The test is a superset
+// (an immediate may equal one of the opcode bytes, which only makes the answer "no"), so it never misses one. Such a
+// function runs a bounded number of instructions and keeps nothing of the budget, so the caller neither stores the budget
+// before the call nor reloads it after.
+func (c *Compiler) isBudgetFree(fnIndex uint32) bool {
+	if !c.usesLoopBudget || fnIndex < c.m.ImportFunctionCount {
+		return false
+	}
+	if c.budgetFreeFor != c.m {
+		c.budgetFreeFor, c.budgetFree = c.m, map[uint32]bool{}
+	}
+	if free, ok := c.budgetFree[fnIndex]; ok {
+		return free
+	}
+	free := false
+	if i := int(fnIndex - c.m.ImportFunctionCount); i < len(c.m.CodeSection) && c.m.CodeSection[i].GoFunc == nil {
+		free = true
+		for _, b := range c.m.CodeSection[i].Body {
+			switch b {
+			case wasm.OpcodeLoop, wasm.OpcodeThrow, wasm.OpcodeThrowRef, wasm.OpcodeCall, wasm.OpcodeCallIndirect,
+				wasm.OpcodeTailCallReturnCall, wasm.OpcodeTailCallReturnCallIndirect, wasm.OpcodeCallRef, wasm.OpcodeReturnCallRef:
+				free = false
+			}
+			if !free {
+				break
+			}
+		}
+	}
+	c.budgetFree[fnIndex] = free
+	return free
 }
 
 func (c *Compiler) reloadMemoryBaseLen() {

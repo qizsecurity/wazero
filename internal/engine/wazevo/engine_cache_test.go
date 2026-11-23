@@ -121,7 +121,7 @@ func TestDeserializeCompiledModule(t *testing.T) {
 				[]byte(testVersion),
 				u32.LeBytes(1), // number of functions.
 			),
-			expErr: "compilationcache: invalid magic number: got WAZEVS but want abcdef",
+			expErr: "compilationcache: invalid magic number: got WAZEVT but want abcdef",
 		},
 		{
 			name: "version mismatch",
